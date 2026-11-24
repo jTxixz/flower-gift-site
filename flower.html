@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bouquet of flowers</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #screen {
+        margin: 0;
+        height: 100%;
+        font-family: Menlo, "SF Mono", Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        line-height: 1.05;
+        letter-spacing: 0;
+        white-space: pre;
+        color: #d0d0d0;
+        background: #000;
+      }
+      #status {
+        position: fixed;
+        left: 12px;
+        bottom: 10px;
+        color: #666;
+        font:
+          12px/1.4 Menlo,
+          Consolas,
+          monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="screen"></pre>
+    <div id="status">starting…</div>
+    <script src="flower_scene.js"></script>
+    <script>
+      const SCENE = window.SCENE;
+      const screen = document.getElementById("screen");
+      const status = document.getElementById("status");
+
+      const FPS = 24;
+      const SPIN_SPEED = 0.6;
+      const TILT = 0.3;
+      const CAM_DIST = 4.0;
+      const MESSAGE = "for you ♥";
+      const NUM_HEARTS = 18;
+      const PIVOT_Y = 0.2;
+
+      const SHADE = ".:-=+*%@";
+      const PETAL_SHADE = "+*#%";
+
+      const WHITE = [244, 248, 251, 254, 255, 231];
+      const PINK = [125, 162, 168, 205, 211, 218, 225];
+      const RED = [52, 88, 124, 160, 196, 203];
+      const PURPLE = [54, 91, 97, 134, 140, 183];
+      const YELLOW = [136, 178, 214, 220, 226, 229];
+      const ORANGE = [130, 166, 202, 208, 214, 216];
+      const GOLD_CENTER = [94, 136, 178, 214, 220];
+      const DARK_CENTER = [52, 58, 94, 130, 136];
+      const GREENS = [22, 28, 28, 34, 35, 71, 77, 114];
+      const PAPER = [101, 144, 187, 223, 230, 231];
+      const RIBBON = [88, 125, 161, 197, 204, 211];
+      const HEART_COLORS = [161, 197, 204, 205, 211, 218];
+      const MSG_COLORS = [161, 168, 205, 211, 218, 225, 218, 211, 205, 168];
+
+      const CUBE = [0, 95, 135, 175, 215, 255];
+      const ANSI16 = [
+        [0, 0, 0], [205, 0, 0], [0, 205, 0], [205, 205, 0],
+        [0, 0, 238], [205, 0, 205], [0, 205, 205], [229, 229, 229],
+        [127, 127, 127], [255, 0, 0], [0, 255, 0], [255, 255, 0],
+        [92, 92, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255],
+      ];
+      const HEX = new Array(256);
+      for (let n = 0; n < 256; n++) {
+        n = Math.max(0, Math.min(255, n));
+        let r, g, b;
+        if (n < 16) {
+          [r, g, b] = ANSI16[n];
+        } else if (n < 232) {
+          const m = n - 16;
+          r = CUBE[(m / 36) | 0];
+          g = CUBE[((m % 36) / 6) | 0];
+          b = CUBE[m % 6];
+        } else {
+          const v = 8 + (n - 232) * 10;
+          r = g = b = v;
+        }
+        HEX[n] = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+      }
+
+      const _n = Math.sqrt(0.45 * 0.45 + 0.6 * 0.6 + 0.66 * 0.66);
+      const LX = -0.45 / _n;
+      const LY = 0.6 / _n;
+      const LZ = 0.66 / _n;
+      const CT = Math.cos(TILT);
+      const ST = Math.sin(TILT);
+
+      let cols = 0;
+      let rows = 0;
+      let hearts = [];
+      let timer = 0;
+
+      function cellSize() {
+        const probe = document.createElement("span");
+        probe.textContent = "M";
+        probe.style.visibility = "hidden";
+        probe.style.position = "absolute";
+        screen.appendChild(probe);
+        const rect = probe.getBoundingClientRect();
+        probe.remove();
+        return {
+          w: rect.width || 7.2,
+          h: rect.height || 13,
+        };
+      }
+
+      function fit() {
+        const { w, h } = cellSize();
+        cols = Math.max(20, Math.min(220, Math.floor(window.innerWidth / w)));
+        rows = Math.max(12, Math.min(80, Math.floor(window.innerHeight / h)));
+      }
+
+      function updateHearts(dt) {
+        while (hearts.length < NUM_HEARTS) {
+          hearts.push([
+            Math.random(),
+            1.0 + Math.random(),
+            0.03 + Math.random() * 0.05,
+            Math.random() * 6.28,
+            HEART_COLORS[(Math.random() * HEART_COLORS.length) | 0],
+          ]);
+        }
+        for (const h of hearts) {
+          h[1] -= h[2] * dt;
+          if (h[1] < 0) {
+            h[0] = Math.random();
+            h[1] = 1.0 + Math.random();
+            h[4] = HEART_COLORS[(Math.random() * HEART_COLORS.length) | 0];
+          }
+        }
+      }
+
+      const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
+      function esc(s) {
+        return s.replace(/[&<>]/g, (c) => ESCAPES[c]);
+      }
+
+      function render(t) {
+        const pts = SCENE.pts;
+        const flowers = SCENE.flowers;
+        const babies = SCENE.babies;
+        const sparkles = SCENE.sparkles;
+
+        const n = cols * rows;
+        const chars = new Array(n).fill(" ");
+        const colors = new Uint8Array(n);
+        const zbuf = new Float64Array(n).fill(-1e9);
+
+        const view_rows = rows - 2;
+        const scale = Math.max(
+          1.0,
+          Math.min((view_rows - 2) / 1.45, (cols - 2) / 2.7)
+        );
+        const sx_scale = scale * 2.0;
+        const cx = cols / 2;
+        const cy = 1 + 0.78 * scale;
+
+        const ang = t * SPIN_SPEED;
+        const ca = Math.cos(ang);
+        const sa = Math.sin(ang);
+
+        function plot(col, row, z, ch, color) {
+          if (0 <= row && row < view_rows && 0 <= col && col < cols) {
+            const i = row * cols + col;
+            if (z > zbuf[i]) {
+              zbuf[i] = z;
+              chars[i] = ch;
+              colors[i] = color;
+            }
+          }
+        }
+
+        for (const h of hearts) {
+          let col = Math.trunc(
+            (h[0] + 0.015 * Math.sin(t * 1.2 + h[3])) * cols
+          );
+          col = ((col % cols) + cols) % cols;
+          plot(col, Math.trunc(h[1] * view_rows), -50, "♥", h[4]);
+        }
+
+        for (const p of pts) {
+          const [x, y, z, nx, ny, nz, pal, tone, two_sided, override] = p;
+          const xr = x * ca - z * sa;
+          const zr = x * sa + z * ca;
+          const yp = y - PIVOT_Y;
+          const yt = yp * CT - zr * ST;
+          const zt = yp * ST + zr * CT;
+          const f = CAM_DIST / (CAM_DIST - zt);
+          const col = Math.trunc(cx + xr * f * sx_scale);
+          const row = Math.trunc(cy - yt * f * scale);
+
+          const nxr = nx * ca - nz * sa;
+          const nzr = nx * sa + nz * ca;
+          const nyt = ny * CT - nzr * ST;
+          const nzt = ny * ST + nzr * CT;
+          let dot = nxr * LX + nyt * LY + nzt * LZ;
+          if (two_sided && dot < 0) dot = -dot * 0.55;
+          let b = 0.25 + 0.75 * Math.max(0, dot) + tone;
+          b = Math.min(0.999, Math.max(0, b));
+          const ch =
+            override === "P"
+              ? PETAL_SHADE[(b * PETAL_SHADE.length) | 0]
+              : override ?? SHADE[(b * SHADE.length) | 0];
+          plot(col, row, zt, ch, pal[(b * pal.length) | 0]);
+        }
+
+        for (const fl of flowers) {
+          const pos = fl[0];
+          const kind = fl[1];
+          const pal = fl[2];
+          const cpal = fl[3];
+          const n_pet = fl[4];
+          const R = fl[5];
+          const seed = fl[6];
+
+          const x = pos[0], y = pos[1], z = pos[2];
+          const xr = x * ca - z * sa;
+          const zr = x * sa + z * ca;
+          const yp = y - PIVOT_Y;
+          const yt = yp * CT - zr * ST;
+          const zt = yp * ST + zr * CT;
+          const f = CAM_DIST / (CAM_DIST - zt);
+          const fx = cx + xr * f * sx_scale;
+          const fy = cy - yt * f * scale;
+          const rx = R * f * sx_scale;
+          const ry = R * f * scale;
+          const dim =
+            -0.4 *
+            (1 -
+              Math.min(
+                1,
+                Math.max(0, (zt + 0.6) / 1.2)
+              ));
+          const rot = seed + ang * 0.7;
+
+          const rStart = Math.trunc(fy - ry) - 1;
+          const rEnd = Math.trunc(fy + ry) + 1;
+          const cStart = Math.trunc(fx - rx) - 1;
+          const cEnd = Math.trunc(fx + rx) + 1;
+
+          for (let row = rStart; row <= rEnd; row++) {
+            const dy = (row + 0.5 - fy) / ry;
+            for (let col = cStart; col <= cEnd; col++) {
+              const dx = (col + 0.5 - fx) / rx;
+              if (kind === "disc") {
+                const s = Math.sqrt(dx * dx + dy * dy);
+                if (s > 1.0) continue;
+                if (s < 0.3) {
+                  let b = 0.55 - 0.35 * dx - 0.35 * dy + dim;
+                  b = Math.min(0.999, Math.max(0, b));
+                  plot(
+                    col,
+                    row,
+                    zt + 0.06,
+                    s < 0.17 ? "@" : "o",
+                    cpal[(b * cpal.length) | 0]
+                  );
+                  continue;
+                }
+                const ph = Math.atan2(dy, dx);
+                const reach =
+                  0.32 +
+                  0.68 * Math.abs(Math.cos((n_pet * (ph + rot)) / 2)) ** 0.7;
+                if (s > reach) continue;
+                const edge = s > reach - 0.14 ? -0.22 : 0.0;
+                let b =
+                  0.62 - 0.22 * dx - 0.28 * dy + 0.12 * s + edge + dim;
+                b = Math.min(0.999, Math.max(0, b));
+                plot(
+                  col,
+                  row,
+                  zt + 0.04 * (1 - s),
+                  PETAL_SHADE[(b * PETAL_SHADE.length) | 0],
+                  pal[(b * pal.length) | 0]
+                );
+              } else {
+                const v = (1 - dy) / 2;
+                if (v < 0 || v > 1) continue;
+                const hw =
+                  0.62 *
+                  Math.sin((Math.PI * 0.5) * Math.min(1, v * 1.5 + 0.05));
+                if (hw <= 0 || Math.abs(dx) > hw) continue;
+                const xn = dx / hw;
+                if (v > 0.72 + 0.28 * Math.cos(1.5 * Math.PI * xn) ** 2)
+                  continue;
+                const seam =
+                  Math.abs(Math.abs(xn) - 0.33) < 0.12 && v > 0.3 ? -0.25 : 0;
+                let b = 0.55 - 0.3 * xn + 0.1 * v + seam + dim;
+                b = Math.min(0.999, Math.max(0, b));
+                plot(
+                  col,
+                  row,
+                  zt + 0.03,
+                  PETAL_SHADE[(b * PETAL_SHADE.length) | 0],
+                  pal[(b * pal.length) | 0]
+                );
+              }
+            }
+          }
+        }
+
+        for (const b of babies) {
+          const [x, y, z, phase] = b;
+          const xr = x * ca - z * sa;
+          const zr = x * sa + z * ca;
+          const yp = y - PIVOT_Y;
+          const yt = yp * CT - zr * ST;
+          const ztb = yp * ST + zr * CT;
+          const fb = CAM_DIST / (CAM_DIST - ztb);
+          const cb = Math.trunc(cx + xr * fb * sx_scale);
+          const rb = Math.trunc(cy - yt * fb * scale);
+          const star = Math.sin(t * 2 + phase) > 0.6;
+          plot(cb, rb, ztb + 0.02, star ? "*" : "·", star ? 231 : 255);
+        }
+
+        for (const s of sparkles) {
+          const [x, y, z, phase, speed] = s;
+          const xr = x * ca - z * sa;
+          const zr = x * sa + z * ca;
+          const yp = y - PIVOT_Y;
+          const yt = yp * CT - zr * ST;
+          const zt = yp * ST + zr * CT;
+          const f = CAM_DIST / (CAM_DIST - zt);
+          const col = Math.trunc(cx + xr * f * sx_scale);
+          const row = Math.trunc(cy - yt * f * scale);
+          const tw = Math.sin(t * speed + phase);
+          if (tw > 0.85) plot(col, row, zt, "*", 231);
+          else if (tw > 0.4) plot(col, row, zt, "+", 225);
+          else if (tw > 0.0) plot(col, row, zt, "·", 218);
+        }
+
+        const mrow = rows - 2;
+        const start = Math.max(0, Math.floor((cols - MESSAGE.length) / 2));
+        const shift = Math.trunc(t * 6);
+        for (let i = 0; i < MESSAGE.length; i++) {
+          if (start + i < cols) {
+            const idx = mrow * cols + start + i;
+            chars[idx] = MESSAGE[i];
+            colors[idx] = MSG_COLORS[(i + shift) % MSG_COLORS.length];
+          }
+        }
+
+        const parts = [];
+        for (let r = 0; r < rows; r++) {
+          let cur = -1;
+          let buf = "";
+          const base = r * cols;
+          const flush = () => {
+            if (!buf) return;
+            parts.push(
+              cur === -1 ? esc(buf) : `<span style="color:${HEX[cur]}">${esc(buf)}</span>`
+            );
+            buf = "";
+          };
+          for (let c = 0; c < cols; c++) {
+            const i = base + c;
+            const ch = chars[i];
+            const col = colors[i];
+            if (ch !== " " && col !== cur) {
+              flush();
+              cur = col;
+            }
+            buf += ch;
+          }
+          flush();
+          parts.push("\n");
+        }
+        return parts.join("");
+      }
+
+      let lastFrame = 0;
+      function tick(now) {
+        requestAnimationFrame(tick);
+        const prev = lastFrame || now;
+        if (now - prev < 1000 / FPS - 1) return;
+        lastFrame = now;
+        updateHearts((now - prev) / 1000);
+        screen.innerHTML = render(now / 1000);
+        status.textContent = "";
+      }
+
+      window.addEventListener("resize", () => {
+        clearTimeout(timer);
+        timer = setTimeout(fit, 180);
+      });
+      fit();
+      requestAnimationFrame(tick);
+    </script>
+  </body>
+</html>
