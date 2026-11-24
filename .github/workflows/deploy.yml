@@ -37,6 +37,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           if [ -n "$NEW_RT" ]; then
             printf '%s' "$NEW_RT" | GH_TOKEN="$GH_PAT" gh secret set VERCEL_REFRESH_TOKEN -R "$GITHUB_REPOSITORY"
+            printf '%s' "$NEW_RT" | GH_TOKEN="$GH_PAT" gh secret set VERCEL_REFRESH_TOKEN -R jTxixz/bouquet-of-flowers
           fi
 
       - name: Install Vercel CLI
