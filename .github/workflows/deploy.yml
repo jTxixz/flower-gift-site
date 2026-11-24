@@ -15,17 +15,37 @@ jobs:
         with:
           node-version: 20
 
+      - name: Refresh Vercel OAuth token
+        id: auth
+        env:
+          VERCEL_REFRESH_TOKEN: ${{ secrets.VERCEL_REFRESH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RESP=$(curl -sS -X POST https://api.vercel.com/login/oauth/token \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            -d 'client_id=cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp' \
+            -d 'grant_type=refresh_token' \
+            --data-urlencode "refresh_token=$VERCEL_REFRESH_TOKEN")
+          echo "$RESP" | jq .
+          TOKEN=$(echo "$RESP" | jq -r '.access_token // empty')
+          NEW_RT=$(echo "$RESP" | jq -r '.refresh_token // empty')
+          if [ -z "$TOKEN" ]; then echo "token refresh failed"; exit 1; fi
+          echo "::add-mask::$TOKEN"
+          [ -n "$NEW_RT" ] && echo "::add-mask::$NEW_RT"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          if [ -n "$NEW_RT" ]; then
+            echo "$NEW_RT" | gh secret set VERCEL_REFRESH_TOKEN -R "$GITHUB_REPOSITORY"
+          fi
+
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
       - name: Create Vercel project
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" https://api.vercel.com/v2/user | head -c 500; echo
-          vercel project add flower-gift --token="$VERCEL_TOKEN"
+          VERCEL_TOKEN: ${{ steps.auth.outputs.token }}
+        run: vercel project create flower-gift --token="$VERCEL_TOKEN" || true
 
       - name: Deploy to production
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TOKEN: ${{ steps.auth.outputs.token }}
         run: vercel deploy --prod --yes --token="$VERCEL_TOKEN" --project flower-gift
