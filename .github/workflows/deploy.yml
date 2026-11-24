@@ -19,22 +19,24 @@ jobs:
         id: auth
         env:
           VERCEL_REFRESH_TOKEN: ${{ secrets.VERCEL_REFRESH_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           RESP=$(curl -sS -X POST https://api.vercel.com/login/oauth/token \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             -d 'client_id=cl_HYyOPBNtFMfHhaUn9L4QPfTZz6TP47bp' \
             -d 'grant_type=refresh_token' \
             --data-urlencode "refresh_token=$VERCEL_REFRESH_TOKEN")
-          echo "$RESP" | jq .
           TOKEN=$(echo "$RESP" | jq -r '.access_token // empty')
           NEW_RT=$(echo "$RESP" | jq -r '.refresh_token // empty')
-          if [ -z "$TOKEN" ]; then echo "token refresh failed"; exit 1; fi
+          if [ -z "$TOKEN" ]; then
+            echo "token refresh failed: $(echo "$RESP" | jq -r '.error // "unknown"')"
+            exit 1
+          fi
           echo "::add-mask::$TOKEN"
           [ -n "$NEW_RT" ] && echo "::add-mask::$NEW_RT"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           if [ -n "$NEW_RT" ]; then
-            echo "$NEW_RT" | gh secret set VERCEL_REFRESH_TOKEN -R "$GITHUB_REPOSITORY"
+            echo "$NEW_RT" | GH_TOKEN="$GH_PAT" gh secret set VERCEL_REFRESH_TOKEN -R "$GITHUB_REPOSITORY"
           fi
 
       - name: Install Vercel CLI
