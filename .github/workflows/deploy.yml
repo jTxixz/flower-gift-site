@@ -21,7 +21,9 @@ jobs:
       - name: Create Vercel project
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel project add flower-gift --token="$VERCEL_TOKEN" || true
+        run: |
+          curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" https://api.vercel.com/v2/user | head -c 500; echo
+          vercel project add flower-gift --token="$VERCEL_TOKEN"
 
       - name: Deploy to production
         env:
